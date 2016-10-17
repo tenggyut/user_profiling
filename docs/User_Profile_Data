@@ -1,0 +1,64 @@
+#User Profile
+
+##social network
+
+###Source
+
+- m.weibo.com
+- weixin public
+- tencent weibo
+- 天涯论坛?
+
+###Raw Data
+
+- post(including direct post, forward, reply): 
+	- user
+	- time
+	- where
+	- content: 
+	- tag
+	- @
+	- forward count
+	- reply count
+	- upvote count
+	- birthday
+	- signature
+- user info
+	- nick name
+	- real name
+	- verified
+	- gender
+	- post count
+	- follower count
+	- following count
+	- liked count
+	- location
+	- intro
+	- qq
+- link
+	- type: following, reply, retweet, like
+	- linkee: 动作发起方
+	- linker: 动作接受方
+	- date
+	- link_content_id
+
+##News
+
+###Source
+
+- site
+	- sina
+	- tencent
+	- 163
+- section
+	- entertainment
+	- finance
+
+###Raw Data
+
+- article
+	- time
+	- title
+	- site
+	- content
+	- key words
