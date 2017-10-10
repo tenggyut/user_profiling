@@ -3,7 +3,8 @@ import re
 import json
 import requests
 import codecs
-from weibo.items import WeiboAccountInfo, WeiboPost, WeiboLink, LikeItem
+import traceback
+from my_spiders.items import WeiboAccountInfo, WeiboPost, WeiboLink, LikeItem
 from scrapy.selector import Selector
 
 class WeiboSpider(scrapy.Spider):
@@ -62,7 +63,7 @@ class WeiboSpider(scrapy.Spider):
             if place:
                 informationItems["cur_location"] = place[0]
             
-            if sexorientation:
+            if sexorientation and tmp_gender:
                 if sexorientation[0] == tmp_gender[0]:
                     informationItems["sexorientation"] = "gay"
                 else:
@@ -110,41 +111,57 @@ class WeiboSpider(scrapy.Spider):
     def extractPosts(self, response):
         posts_json = json.loads(response.body)
 
-        for post_card_json in posts_json["cards"][0]["card_group"]:
-            post = WeiboPost()
-            post_json = post_card_json["mblog"]
-            post["post_id"] = post_json["idstr"]
-            post["user_id"] = str(post_json["user"]["id"])
-            post["user_nickname"] = post_json["user"]["screen_name"]
-            post["content"] = post_json["text"]
-            post["post_date"] = str(post_json["created_timestamp"])
-            post["tags"] = ",".join(post_json["hot_weibo_tags"])
+        try:
+            for post_card_json in posts_json["cards"][0]["card_group"]:
+                post = WeiboPost()
+                post_json = post_card_json["mblog"]
+                post["post_id"] = post_json["idstr"]
+                post["user_id"] = str(post_json["user"]["id"])
+                post["user_nickname"] = post_json["user"]["screen_name"]
+                post["content"] = post_json["text"]
+                post["post_date"] = str(post_json["created_timestamp"])
 
-            if "retweeted_status" in post_json:
-                post["post_type"] = "retweet"
-                next_account_url = "http://m.weibo.cn/u/%s" % str(post_json["retweeted_status"]["user"]["id"])
-                yield scrapy.Request(url= next_account_url, callback=self.parse)
+                hot_tags = []
+                for hot_tag in post_json["hot_weibo_tags"]:
+                    hot_tags.append(hot_tag["tag_name"])
                 
-                retweet_link_item = WeiboLink()
-                retweet_link_item["linkee_id"] = post["user_id"]
-                retweet_link_item["linker_id"] = str(post_json["retweeted_status"]["user"]["id"])
-                retweet_link_item["link_type"] = "retweet"
-                retweet_link_item["link_date"] = post["post_date"]
-                retweet_link_item["link_content_id"] = post["post_id"]
-                yield retweet_link_item
+                post["tags"] = ",".join(hot_tags)
 
-            else:
-                post["post_type"] = "direct"
+                if "retweeted_status" in post_json:
+                    post["post_type"] = "retweet"
+                    next_account_url = "http://m.weibo.cn/u/%s" % str(post_json["retweeted_status"]["user"]["id"])
+                    yield scrapy.Request(url= next_account_url, callback=self.parse)
+                
+                    retweet_link_item = WeiboLink()
+                    retweet_link_item["linkee_id"] = post["user_id"]
+                    retweet_link_item["linker_id"] = str(post_json["retweeted_status"]["user"]["id"])
+                    retweet_link_item["link_type"] = "retweet"
+                    retweet_link_item["link_date"] = post["post_date"]
+                    retweet_link_item["link_content_id"] = post["post_id"]
+                    yield retweet_link_item
 
-            post["endpoint"] = post_json["source"]
-            post["upvote_count"] = str(post_json["like_count"])
-            post["reply_count"] = str(post_json["comments_count"])
-            post["forward_count"] = str(post_json["reposts_count"])
+                else:
+                    post["post_type"] = "direct"
 
-            yield post
+                post["endpoint"] = post_json["source"]
+                post["upvote_count"] = str(post_json["like_count"])
+                post["reply_count"] = str(post_json["comments_count"])
+                post["forward_count"] = str(post_json["reposts_count"])
             
-            comment_url = "http://m.weibo.cn/single/rcList?format=cards&id=%s&type=comment&hot=0&page=1" % post["post_id"]
-            yield scrapy.Request(url= comment_url, callback=self.extractRelies)
+                img_url_template = "http://ww4.sinaimg.cn/large/%s.jpg"
+                pic_urls = []
+                for pic_id in post_json["pic_ids"]:
+                    pic_urls.append(img_url_template % pic_id)
+
+                post["pics"] = ",".join(pic_urls)
+
+                yield post
+
+                comment_url = "http://m.weibo.cn/single/rcList?format=cards&id=%s&type=comment&hot=0&page=1" % post["post_id"]
+                yield scrapy.Request(url= comment_url, callback=self.extractReplies)
+        except KeyError:
+            traceback.print_exc()
+            self.logger.warning("no posts")
         
         if posts_json["cards"][0]["mod_type"] == "mod/pagelist":
             cur_page = int(response.url.split("page=")[1].strip())
@@ -154,35 +171,39 @@ class WeiboSpider(scrapy.Spider):
     def extractReplies(self, response):
         replies_json = json.loads(response.body)
 
-        for post_json in replies_json[1]["card_group"]:
-            post = WeiboPost()
-            post["post_id"] = str(post_json["id"])
-            post["user_id"] = str(post_json["user"]["id"])
-            post["user_nickname"] = post_json["user"]["screen_name"]
-            post["content"] = post_json["text"]
-            post["post_date"] = str(post_json["created_at"])
-            post["post_type"] = "reply"
+        try:
+            for post_json in replies_json[-1]["card_group"]:
+                post = WeiboPost()
+                post["post_id"] = str(post_json["id"])
+                post["user_id"] = str(post_json["user"]["id"])
+                post["user_nickname"] = post_json["user"]["screen_name"]
+                post["content"] = post_json["text"]
+                post["post_date"] = str(post_json["created_at"])
+                post["post_type"] = "reply"
 
-            post["endpoint"] = post_json["source"]
-            post["upvote_count"] = str(post_json["like_counts"])
-            post["reply_count"] = "0"
-            post["forward_count"] = "0"
+                post["endpoint"] = post_json["source"]
+                post["upvote_count"] = str(post_json["like_counts"])
+                post["reply_count"] = "0"
+                post["forward_count"] = "0"
 
-            if "reply_id" in post_json:
-                reply_link_item = WeiboLink()
-                reply_link_item["linkee_id"] = "linkee_id_placeholder"
-                reply_link_item["linker_id"] = "linker_id_placeholder"
-                reply_link_item["link_type"] = "reply"
-                reply_link_item["link_date"] = "link_date_placeholder"
-                reply_link_item["link_content_id"] = post_json["reply_id"]
-                yield reply_link_item
+                if "reply_id" in post_json:
+                    reply_link_item = WeiboLink()
+                    reply_link_item["linkee_id"] = post["user_id"]
+                    reply_link_item["linker_id"] = "linker_id_placeholder"
+                    reply_link_item["link_type"] = "reply"
+                    reply_link_item["link_date"] = post["post_date"]
+                    reply_link_item["link_content_id"] = post_json["reply_id"]
+                    yield reply_link_item
 
-            yield post
+                yield post
+        except KeyError:
+            traceback.print_exc()
+            self.logger.warning("no replies")
         
-        if posts_json[1]["mod_type"] == "mod/pagelist":
+        if replies_json[-1]["mod_type"] == "mod/pagelist":
             cur_page = int(response.url.split("page=")[1].strip())
             next_page = cur_page + 1
-            yield scrapy.Request(url= response.url.replace("page=" + str(cur_page), "page=" + str(next_page)), callback=self.extractPosts)
+            yield scrapy.Request(url= response.url.replace("page=" + str(cur_page), "page=" + str(next_page)), callback=self.extractReplies)
 
 
     def extractFollowersOrFollowings(self, response):
@@ -196,19 +217,23 @@ class WeiboSpider(scrapy.Spider):
             linkee_key = "linker_id"
             linker_key = "linkee_id" 
 
-        for follower_json in followers_json["cards"][0]["card_group"]:
-            follower_id = str(follower_json["user"]["id"])
+        try:
+            for follower_json in followers_json["cards"][0]["card_group"]:
+                follower_id = str(follower_json["user"]["id"])
 
-            follower_link_item = WeiboLink()
-            follower_link_item[linkee_key] = follower_id
-            follower_link_item[linker_key] = account_id
-            follower_link_item["link_type"] = "following"
-            follower_link_item["link_date"] = ""
-            follower_link_item["link_content_id"] = ""
-            yield follower_link_item
+                follower_link_item = WeiboLink()
+                follower_link_item[linkee_key] = follower_id
+                follower_link_item[linker_key] = account_id
+                follower_link_item["link_type"] = "following"
+                follower_link_item["link_date"] = ""
+                follower_link_item["link_content_id"] = ""
+                yield follower_link_item
 
-            follower_url = "http://m.weibo.cn/u/%s" % follower_id
-            yield scrapy.Request(url = follower_url, callback = self.parse)
+                follower_url = "http://m.weibo.cn/u/%s" % follower_id
+                yield scrapy.Request(url = follower_url, callback = self.parse)
+        except KeyError:
+            traceback.print_exc()
+            self.logger.warning("no follower or friend")
 
         if followers_json["cards"][0]["mod_type"] == "mod/pagelist":
             cur_page = int(response.url.split("page=")[1].strip())
@@ -220,20 +245,24 @@ class WeiboSpider(scrapy.Spider):
         like_weibos_json = json.loads(response.body)
         account_id = re.findall('accountId=(\d+)', response.url)[0]
 
-        for like_card_json in like_weibos_json["cards"][0]["card_group"]:
-            like_json = like_card_json["mblog"]
-            like_weibo_user_id = str(like_json["user"]["id"])
+        try:
+            for like_card_json in like_weibos_json["cards"][0]["card_group"]:
+                like_json = like_card_json["mblog"]
+                like_weibo_user_id = str(like_json["user"]["id"])
 
-            like_weibo_link_item = WeiboLink()
-            like_weibo_link_item["linkee_id"] = account_id
-            like_weibo_link_item["linker_id"] = like_weibo_user_id
-            like_weibo_link_item["link_type"] = "like_weibo"
-            like_weibo_link_item["link_date"] = ""
-            like_weibo_link_item["link_content_id"] = like_json["idstr"]
-            yield like_weibo_link_item
+                like_weibo_link_item = WeiboLink()
+                like_weibo_link_item["linkee_id"] = account_id
+                like_weibo_link_item["linker_id"] = like_weibo_user_id
+                like_weibo_link_item["link_type"] = "like_weibo"
+                like_weibo_link_item["link_date"] = ""
+                like_weibo_link_item["link_content_id"] = like_json["idstr"]
+                yield like_weibo_link_item
 
-            like_weibo_user_url = "http://m.weibo.cn/u/%s" % like_weibo_user_id
-            yield scrapy.Request(url = like_weibo_user_url, callback = self.parse)
+                like_weibo_user_url = "http://m.weibo.cn/u/%s" % like_weibo_user_id
+                yield scrapy.Request(url = like_weibo_user_url, callback = self.parse)
+        except KeyError:
+            traceback.print_exc()
+            self.logger.warning("no liked weibo")
 
         if like_weibos_json["cards"][0]["mod_type"] == "mod/pagelist":
             cur_page = int(response.url.split("page=")[1].strip())
@@ -244,13 +273,17 @@ class WeiboSpider(scrapy.Spider):
         like_imgs_json = json.loads(response.body)
         account_id = re.findall('accountId=(\d+)', response.url)[0]
 
-        for like_img_json in like_imgs_json["cards"][0]["card_group"][0]["pics"]:
+        try:
+            for like_img_json in like_imgs_json["cards"][0]["card_group"][0]["pics"]:
 
-            like_item = LikeItem()
-            like_item["item_type"] = "img"
-            like_item["pic"] = like_img_json["pic_ori"]
-            like_item["user_id"] = account_id
-            yield like_item
+                like_item = LikeItem()
+                like_item["item_type"] = "img"
+                like_item["pic"] = like_img_json["pic_ori"]
+                like_item["user_id"] = account_id
+                yield like_item
+        except KeyError:
+            traceback.print_exc()
+            self.logger.warning("no like imgs")
 
         if like_imgs_json["cards"][0]["mod_type"] == "mod/pagelist":
             cur_page = int(response.url.split("page=")[1].strip())
@@ -268,17 +301,21 @@ class WeiboSpider(scrapy.Spider):
         else:
             item_type = "movie"
 
-        for like_place_json in like_places_json["cards"][0]["card_group"]:
+        try:
+            for like_place_json in like_places_json["cards"][0]["card_group"]:
 
-            like_item = LikeItem()
-            like_item["item_type"] = item_type
-            like_item["title"] = like_place_json["title_sub"]
-            like_item["desc"] = like_place_json["desc1"]
-            like_item["pic"] = like_place_json["pic"]
-            like_item["url"] = like_place_json["scheme"]
-            like_item["upvote_count"] = re.findall(u'(\d+)\u4eba\u8d5e\u8fc7', like_place_json["desc2"])
-            like_item["user_id"] = account_id
-            yield like_item
+                like_item = LikeItem()
+                like_item["item_type"] = item_type
+                like_item["title"] = like_place_json["title_sub"]
+                like_item["desc"] = like_place_json["desc1"]
+                like_item["pic"] = like_place_json["pic"]
+                like_item["url"] = like_place_json["scheme"]
+                like_item["upvote_count"] = re.findall(u'(\d+)\u4eba\u8d5e\u8fc7', like_place_json["desc2"])
+                like_item["user_id"] = account_id
+                yield like_item
+        except KeyError:
+            traceback.print_exc()
+            self.logger.warning("no liked items")
 
         if like_places_json["cards"][0]["mod_type"] == "mod/pagelist":
             cur_page = int(response.url.split("page=")[1].strip())

@@ -10,6 +10,25 @@ def paresDate(dateString):
     else:
         return int(time.mktime(datetime.datetime.strptime(dateString, "%I:%M %p - %d %b %Y").timetuple()))
 
+class NewsItem(Item):
+    newsId = Field()
+    url = Field()
+    date = Field()
+    title = Field()
+    s_title = Field()
+    content = Field()
+    keywords = Field()
+    source = Field()
+    category = Field()
+    pics = Field()
+    summary = Field()
+    author = Field()
+
+    def rowkey(self):
+        return self["newsId"]
+
+    def table_name(self):
+        return "news"
 
 class WeiboAccountInfo(Item):
     account_id = Field()
@@ -37,7 +56,7 @@ class WeiboAccountInfo(Item):
         return self["account_id"]
 
     def table_name(self):
-        return "weibo:account_info"
+        return "weibo:account"
 
 class WeiboPost(Item):
     post_id = Field()
@@ -52,6 +71,7 @@ class WeiboPost(Item):
     upvote_count = Field()
     reply_count = Field()
     forward_count = Field()
+    pics = Field()
 
     def rowkey(self):
         return self["post_id"]
@@ -69,10 +89,10 @@ class LikeItem(Item):
     upvote_count = Field()
 
     def rowkey(self):
-        return self["post_id"]
+        return self["user_id"] + ",#," + self["item_type"] + ",#," + self["pic"]
 
     def table_name(self):
-        return "weibo:likes"     
+        return "weibo:like_item"     
 
 class WeiboLink(Item):
     linker_id = Field()
@@ -82,7 +102,7 @@ class WeiboLink(Item):
     link_content_id = Field()
 
     def rowkey(self):
-        return self["linkee_id"] + ",#," + self["link_type"] + ",#," + self["linker_id"] + self["link_date"]
+        return self["linkee_id"] + ",#," + self["link_type"] + ",#," + self["linker_id"] + ",#," + self["link_date"]
 
     def table_name(self):
-        return "weibo:link"
+        return "weibo:account_link"

@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 from scrapy import signals, Item
 from scrapy.exporters import JsonLinesItemExporter
-import weibo.items
+from my_spiders.my_exporter import HBaseRowItemExporter
+import my_spiders.items
 import happybase
 
 item_types = [cls.__name__ for cls in vars()['Item'].__subclasses__()]
@@ -40,9 +41,7 @@ class JsonLinesExportPipeline(object):
         return item
         
 class HBaseExportPipeline(object):
-    def __init__(self):
-        self.conn = happybase.Connection('192.168.55.10')
-
+    
     @classmethod
     def from_crawler(cls, crawler):
         pipeline = cls()
@@ -51,6 +50,7 @@ class HBaseExportPipeline(object):
         return pipeline
 
     def spider_opened(self, spider):
+        self.conn = happybase.Connection(spider.settings.get("HBASE_ZK"))
         self.exporter = HBaseRowItemExporter(self.conn, ensure_ascii=False)
 
     def spider_closed(self, spider):
